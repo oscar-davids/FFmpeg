@@ -2147,7 +2147,7 @@ int ff_nvenc_send_frame(AVCodecContext *avctx, const AVFrame *frame)
 
         if (ctx->forced_idr >= 0 && frame->pict_type == AV_PICTURE_TYPE_I) {
             pic_params.encodePicFlags =
-                ctx->forced_idr ? NV_ENC_PIC_FLAG_FORCEIDR : NV_ENC_PIC_FLAG_FORCEINTRA;
+                ctx->forced_idr ? (NV_ENC_PIC_FLAG_FORCEIDR | NV_ENC_PIC_FLAG_OUTPUT_SPSPPS) : NV_ENC_PIC_FLAG_FORCEINTRA;
         } else {
             pic_params.encodePicFlags = 0;
         }
