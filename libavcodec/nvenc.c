@@ -2075,6 +2075,11 @@ static void reconfig_encoder(AVCodecContext *avctx, const AVFrame *frame)
     }
 }
 
+int attribute_align_arg av_nvenc_flush(AVCodecContext *avctx)
+{
+  return ff_nvenc_send_frame(avctx, NULL);
+}
+
 int ff_nvenc_send_frame(AVCodecContext *avctx, const AVFrame *frame)
 {
     NVENCSTATUS nv_status;

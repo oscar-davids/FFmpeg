@@ -6234,6 +6234,8 @@ const AVCodecDescriptor *avcodec_descriptor_get_by_name(const char *name);
  */
 AVCPBProperties *av_cpb_properties_alloc(size_t *size);
 
+int av_nvenc_flush(AVCodecContext *avctx);
+
 /**
  * @}
  */
