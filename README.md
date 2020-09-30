@@ -44,3 +44,213 @@ GPL. Please refer to the LICENSE file for detailed information.
 Patches should be submitted to the ffmpeg-devel mailing list using
 `git format-patch` or `git send-email`. Github pull requests should be
 avoided because they are not part of our review process and will be ignored.
+
+
+
+
+FFmpeg with lvpdiff filter
+=============
+
+## Build FFmpeg with lvpdiff filter on ubuntu18.04
+
+FFmpeg is a collection of libraries and tools to process multimedia content
+such as audio, video, subtitles and related metadata.
+
+1. prerequest
+
+These are packages required for compiling, but you can remove them when you are done if you prefer:
+
+- install packages
+
+	sudo apt-get update -qq && sudo apt-get -y install autoconf automake build-essential cmake \
+  git-core libass-dev libfreetype6-dev libsdl2-dev libtool libva-dev libvdpau-dev libvorbis-dev\
+  libxcb1-dev libxcb-shm0-dev libxcb-xfixes0-dev pkg-config texinfo wget zlib1g-dev
+
+	sudo apt-get install nasm
+
+	sudo apt-get install yasm
+	
+	#to build opencv
+	
+	sudo apt-get install cmake-gui
+
+To build ffmpeg with lvpdiff filter, need to install customized opencv. 
+Now opencv support to build on ubuntu GUI, so need ubuntu os with GUI.
+
+- build and install OpenCV Library
+
+  clone source code 
+  
+	git clone https://github.com/oscar-davids/opencv
+  
+  git checkout dev-lvpdiff
+
+  build and install openCV
+  
+  cd opencv
+  
+  mkdir build
+  
+  cd build
+  
+  cmake-gui ..
+    
+  ![Alt text](ubuntu-cmake-gui-setting.png?raw=true "")
+
+  #in build directory
+  
+  sudo make -j8
+  
+  #install to /usr/local/bin
+  
+  sudo make install
+  
+2. FFmpeg Compilation 
+
+- clone source code 
+
+  git clone https://github.com/oscar-davids/FFmpeg
+  
+  git checkout dev-lvpdiff
+  
+- build 
+
+  ./configure --prefix="$HOME/ffmpeg_build" --enable-shared --enable-libopencv
+
+  make && make install
+  
+3. execute
+ 
+  cd $HOME/ffmpeg_build/bin
+  
+  ffmpeg -i main.mp4 -i ref.mp4 -lavfi  "lvpdiff" -f null -
+  
+  ffmpeg -i main.mp4 -i ref.mp4 -lavfi  lvpdiff="stats_file=stats.log" -f null -
+  
+  **remark some case need to set env:  export LD_LIBRARY_PATH="$HOME/ffmpeg_build/lib/:/usr/local/lib:$LD_LIBRARY_PATH"
+ 
+  
+## Build FFmpeg with lvpdiff filter on Windows10
+
+1. prerequest
+
+  Visual Studio 2017 or 2019
+  MSYS2
+  YASM
+
+   Visual Studio
+   
+   https://visualstudio.microsoft.com/
+   
+   MSYS2
+   
+    Download and run the installer at linked URL(http://msys2.github.io, https://packages.msys2.org/package/mingw-w64-x86_64-gcc). 
+    
+    Follow the instructions and install it in "C:\workspace\windows\msys64" folder.
+    
+    open MSYS2 MSYS(x64) windows console as administrator
+    
+    Install required tools: 
+    
+	    pacman -S make gcc diffutils git
+      
+    Rename C:\workspace\windows\msys64\usr\bin\link.exe to C:\workspace\windows\msys64\usr\bin\link_orig.exe, in order to use MSVC  link.exe (naming conflict)
+    
+    remove "rem" comment in "c:/msys64/msys2_shell.cmd" file.
+
+	rem set MSYS2_PATH_TYPE=inherit -> set MSYS2_PATH_TYPE=inherit
+
+   YASM
+   
+    Download Win64.exe(http://yasm.tortall.net/Download.html) and move it to C:\workspace\windows
+    
+    Rename yasm-<version>-win64.exe to yasm.exe
+    
+    Add C:\workspace\windows to PATH environment variable (setx PATH "%PATH%;C:\workspace\windows)
+    
+    Ready to compile
+  
+- Install OpenCV 
+
+  clone source code 
+  
+	git clone https://github.com/oscar-davids/opencv
+  
+  git checkout dev-lvpdiff
+
+  build and install openCV using cmake-gui and visualstudio compile tool   
+
+- Install cuda and cudnn(option)
+
+https://developer.nvidia.com/cuda-toolkit
+
+https://developer.nvidia.com/rdp/cudnn-download
+
+2. Compilation 
+
+- Launch msys2 shell from Visual Studio Code shell
+  
+  open console
+  
+  	C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\VC\Auxiliary\Build\vcvars64.bat
+  
+  set tensorflow library path
+  
+  	set lib=%lib%;c:/$opencvlibpath
+  
+  Execute msys2
+  
+  	C:\workspace\windows\msys64\msys2_shell.cmd -mingw64
+  
+  Following command have to execute in new msys2 console winndow.
+  
+- copy openCV c headfiles and lib
+
+ 	cp  -r $opencvroot/include/ /usr/local/include
+	
+	cp  -r $opencvroot/lib/opencv_core.lib opencv_imageproc.lib /usr/local/lib/
+	
+	  
+- clone source code 
+
+  git clone https://github.com/oscar-davids/FFmpeg
+  
+  git checkout dev-lvpdiff
+  
+- copy cuda c headfiles and lib(option)
+
+  cd detectorffmpeg
+    
+  mkdir nv_sdk
+  
+  cp $cudaroot/include nv_sdk
+  
+  cp $cudaroot/lib/x64 nv_sdk/x64    
+  
+- install nv-codec-headers(remark PKG_CONFIG_PATH)
+
+	cd detectorffmpeg
+
+	cd nv-codec-headers/
+
+	make install PREFIX=/usr/local
+
+	cd ..
+  
+	PKG_CONFIG_PATH="/usr/local/lib/pkgconfig" ./configure --toolchain=msvc --arch=x86_64 --enable-cuda --enable-cuvid --enable-nvenc --enable-nonfree --enable-libopencv --disable-libnpp --extra-cflags=-I/usr/local/include --extra-cflags=-I../nv_sdk/include --extra-ldflags=-L/usr/lib --extra-ldflags=-L/usr/local/lib --extra-ldflags=-L../nv_sdk/x64
+
+	make -j 8
+	
+3. execute
+
+  	ffmpeg -i main.mp4 -i ref.mp4 -lavfi  "lvpdiff" -f null -
+  
+  	ffmpeg -i main.mp4 -i ref.mp4 -lavfi  lvpdiff="stats_file=stats.log" -f null -
+  
+
+Reference
+=============
+
+https://trac.ffmpeg.org/wiki/CompilationGuide/Ubuntu
+
+
