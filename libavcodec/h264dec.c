@@ -57,6 +57,14 @@
 
 const uint16_t ff_h264_mb_sizes[4] = { 256, 384, 512, 768 };
 
+#define _DBG 0
+#if EXTRACT_DCT
+#if _DBG
+#include "bmpio.h"
+int 	g_framenum = 0;
+char 	g_path[256] = {0,};
+#endif
+#endif
 int avpriv_h264_has_num_reorder_frames(AVCodecContext *avctx)
 {
     H264Context *h = avctx->priv_data;
@@ -352,6 +360,11 @@ static int h264_init_context(AVCodecContext *avctx, H264Context *h)
     for (i = 0; i < h->nb_slice_ctx; i++)
         h->slice_ctx[i].h264 = h;
 
+#if EXTRACT_DCT
+	h->dcmatrix = av_mallocz(avctx->width * avctx->height * 2);
+	if(!h->dcmatrix)
+		return AVERROR(ENOMEM);
+#endif	
     return 0;
 }
 
@@ -369,6 +382,10 @@ static av_cold int h264_decode_end(AVCodecContext *avctx)
     }
     memset(h->delayed_pic, 0, sizeof(h->delayed_pic));
 
+#if EXTRACT_DCT
+	if(h->dcmatrix)
+		av_free(h->dcmatrix);
+#endif	
     h->cur_pic_ptr = NULL;
 
     av_freep(&h->slice_ctx);
@@ -958,6 +975,13 @@ static int send_next_delayed_frame(H264Context *h, AVFrame *dst_frame,
     return buf_index;
 }
 
+#if _DBG
+void writeimage(H264Context *h)
+{
+	sprintf(g_path, "testdata/test_%04d.bmp",g_framenum);
+	WriteShortBmp(g_path, h->width_from_caller, h->height_from_caller, h->dcmatrix);
+}
+#endif
 static int h264_decode_frame(AVCodecContext *avctx, void *data,
                              int *got_frame, AVPacket *avpkt)
 {
@@ -975,8 +999,16 @@ static int h264_decode_frame(AVCodecContext *avctx, void *data,
     ff_h264_unref_picture(h, &h->last_pic_for_ec);
 
     /* end of stream, output what is still in the buffers */
-    if (buf_size == 0)
-        return send_next_delayed_frame(h, pict, got_frame, 0);
+    if (buf_size == 0){
+        ret = send_next_delayed_frame(h, pict, got_frame, 0);
+#if _DBG			
+		if(*got_frame) {
+			g_framenum++;
+			writeimage(h);
+		}
+#endif
+		return ret;
+    }
 
     if (h->is_avc && av_packet_get_side_data(avpkt, AV_PKT_DATA_NEW_EXTRADATA, NULL)) {
         int side_size;
@@ -999,7 +1031,14 @@ static int h264_decode_frame(AVCodecContext *avctx, void *data,
 
     if (!h->cur_pic_ptr && h->nal_unit_type == H264_NAL_END_SEQUENCE) {
         av_assert0(buf_index <= buf_size);
-        return send_next_delayed_frame(h, pict, got_frame, buf_index);
+		ret = send_next_delayed_frame(h, pict, got_frame, buf_index);
+#if _DBG	
+		if(*got_frame){
+			g_framenum++;
+			writeimage(h);
+		}
+#endif		
+        return ret;
     }
 
     if (!(avctx->flags2 & AV_CODEC_FLAG2_CHUNKS) && (!h->cur_pic_ptr || !h->has_slice)) {
@@ -1023,12 +1062,295 @@ static int h264_decode_frame(AVCodecContext *avctx, void *data,
         }
     }
 
+#if _DBG
+	if(*got_frame){
+		g_framenum++;
+		writeimage(h);
+	}
+#endif	
     av_assert0(pict->buf[0] || !*got_frame);
 
     ff_h264_unref_picture(h, &h->last_pic_for_ec);
 
     return get_consumed_bytes(buf_index, buf_size);
 }
+#if _DBG
+
+	 int WriteBinaryBmp(char *bmpFileName, int width, int height, unsigned char *greyimg)
+	 {
+	 
+#if _DBG
+		 int i;
+		 int rwbytes;
+		 int delta;
+		 unsigned char temp[16], *pImage;
+		 BITMAPFILEHEADER bmpfh;
+		 BITMAPINFOHEADER bmpih;
+		 RGBQUAD bmpcolormap[256];
+		 FILE* bmpFile;
+#ifdef _TO_REAL_DRIVE_
+		 char buf[256];
+		 memset(buf, 0x00, sizeof(buf));
+		 strcpy(buf, bmpFileName);
+		 buf[0] = _TO_REAL_DRIVE_;
+		 bmpFileName = buf;
+#endif
+		 bmpFile = fopen(bmpFileName,"wb");
+		 if (bmpFile==NULL) return -1;
+	 
+		 bmpfh.bfType = 0x4D42; //"BM";
+		 bmpfh.bfSize = sizeof(BITMAPFILEHEADER);
+		 bmpfh.bfReserved1 = 0;
+		 bmpfh.bfReserved2 = 0;
+		 bmpfh.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER) + sizeof(RGBQUAD)*256;
+	 
+		 rwbytes = (int)((width*8+31)&(~31))/8;
+		 bmpih.biSize = sizeof(BITMAPINFOHEADER);
+		 bmpih.biWidth = width;
+		 bmpih.biHeight = height;
+		 bmpih.biPlanes = 1;
+		 bmpih.biBitCount = 8;
+		 bmpih.biCompression = 0;
+		 bmpih.biSizeImage = rwbytes*height;
+		 bmpih.biXPelsPerMeter = 0;
+		 bmpih.biYPelsPerMeter = 0;
+		 bmpih.biClrUsed = 0;
+		 bmpih.biClrImportant = 0;
+	 
+		 bmpcolormap[0].rgbBlue =
+			 bmpcolormap[0].rgbGreen =
+			 bmpcolormap[0].rgbRed = 0;
+		 bmpcolormap[0].rgbReserved = 0;
+		 
+		 for (i=1; i<256; i++)
+		 {
+			 bmpcolormap[i].rgbBlue =
+				 bmpcolormap[i].rgbGreen =
+				 bmpcolormap[i].rgbRed = 0xff;
+			 bmpcolormap[i].rgbReserved = 0;
+		 }
+	 
+		 fwrite(&bmpfh,sizeof(BITMAPFILEHEADER),1,bmpFile);
+		 fwrite(&bmpih,sizeof(BITMAPINFOHEADER),1,bmpFile);
+		 fwrite(bmpcolormap,sizeof(RGBQUAD)*256,1,bmpFile);
+	 
+	 
+		 pImage = greyimg + width*(height-1);
+	 
+		 delta = rwbytes - width;
+		 for (i=0; i<height; i++)
+		 {
+			 // 	 bmpFile.Write(pImage, width);
+			 fwrite(pImage,width,1,bmpFile);
+			 if (delta>0)
+			 {
+				 // 		 bmpFile.Write(temp, delta);
+				 fwrite(temp,delta,1,bmpFile);
+			 }
+			 pImage -= width;
+		 }
+	 
+		 //  bmpFile.Close();
+		 fclose(bmpFile);
+#endif
+		 return 0;
+	 }
+	 
+	 int WriteGreyBmp(char *bmpFileName, int width, int height, unsigned char *greyimg)
+	 {
+	 
+#if _DBG
+		 int i;
+		 int rwbytes;
+		 int delta;
+		 unsigned char temp[16], *pImage;
+		 BITMAPFILEHEADER bmpfh;
+		 BITMAPINFOHEADER bmpih;
+		 RGBQUAD bmpcolormap[256];
+		 FILE* bmpFile;
+#ifdef _TO_REAL_DRIVE_
+		 char buf[256];
+		 memset(buf, 0x00, sizeof(buf));
+		 strcpy(buf, bmpFileName);
+		 buf[0] = _TO_REAL_DRIVE_;
+		 bmpFileName = buf;
+#endif
+	 
+		 bmpFile = fopen(bmpFileName,"wb");
+		 if (bmpFile==NULL) return -1;
+	 
+		 bmpfh.bfType = 0x4D42; //"BM";
+		 bmpfh.bfSize = sizeof(BITMAPFILEHEADER);
+		 bmpfh.bfReserved1 = 0;
+		 bmpfh.bfReserved2 = 0;
+		 bmpfh.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER) + sizeof(RGBQUAD)*256;
+	 
+		 rwbytes = (int)((width*8+31)&(~31))/8;
+		 bmpih.biSize = sizeof(BITMAPINFOHEADER);
+		 bmpih.biWidth = width;
+		 bmpih.biHeight = height;
+		 bmpih.biPlanes = 1;
+		 bmpih.biBitCount = 8;
+		 bmpih.biCompression = 0;
+		 bmpih.biSizeImage = rwbytes*height;
+		 bmpih.biXPelsPerMeter = 0;
+		 bmpih.biYPelsPerMeter = 0;
+		 bmpih.biClrUsed = 0;
+		 bmpih.biClrImportant = 0;
+	 
+		 for (i=0; i<256; i++)
+		 {
+			 bmpcolormap[i].rgbBlue =
+				 bmpcolormap[i].rgbGreen =
+					 bmpcolormap[i].rgbRed = i;
+			 bmpcolormap[i].rgbReserved = 0;
+		 }
+	 
+		 fwrite(&bmpfh,sizeof(BITMAPFILEHEADER),1,bmpFile);
+		 fwrite(&bmpih,sizeof(BITMAPINFOHEADER),1,bmpFile);
+		 fwrite(bmpcolormap,sizeof(RGBQUAD)*256,1,bmpFile);
+	 
+	 
+		 pImage = greyimg + width*(height-1);
+	 
+		 delta = rwbytes - width;
+		 for (i=0; i<height; i++)
+		 {
+	 // 	 bmpFile.Write(pImage, width);
+			 fwrite(pImage,width,1,bmpFile);
+			 if (delta>0)
+			 {
+	 // 		 bmpFile.Write(temp, delta);
+				 fwrite(temp,delta,1,bmpFile);
+			 }
+			 pImage -= width;
+		 }
+	 
+	 //  bmpFile.Close();
+		 fclose(bmpFile);
+#endif
+		 return 0;
+	 }
+	 
+	 int WriteColorBmp(char *bmpFileName, int width, int height, unsigned char *colorimg)
+	 {
+	 
+#if _DBG
+		 int i;
+		 int rwbytes;
+		 int delta;
+		 unsigned char temp[16], *pImage;
+		 BITMAPFILEHEADER bmpfh;
+		 BITMAPINFOHEADER bmpih;
+		 FILE* bmpFile;
+#ifdef _TO_REAL_DRIVE_
+		 char buf[256];
+		 memset(buf, 0x00, sizeof(buf));
+		 strcpy(buf, bmpFileName);
+		 buf[0] = _TO_REAL_DRIVE_;
+		 bmpFileName = buf;
+#endif
+	 
+	 //return 0;
+		 bmpFile = fopen(bmpFileName,"wb");
+		 if (bmpFile==NULL) return -1;
+	 
+		 bmpfh.bfType = 0x4D42; //"BM";
+		 bmpfh.bfSize = sizeof(BITMAPFILEHEADER);
+		 bmpfh.bfReserved1 = 0;
+		 bmpfh.bfReserved2 = 0;
+		 bmpfh.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
+	 
+		 rwbytes = (int)((width*24+31)&(~31))/8;
+		 bmpih.biSize = sizeof(BITMAPINFOHEADER);
+		 bmpih.biWidth = width;
+		 bmpih.biHeight = height;
+		 bmpih.biPlanes = 1;
+		 bmpih.biBitCount = 24;
+		 bmpih.biCompression = 0;
+		 bmpih.biSizeImage = rwbytes*height;
+		 bmpih.biXPelsPerMeter = 0;
+		 bmpih.biYPelsPerMeter = 0;
+		 bmpih.biClrUsed = 0;
+		 bmpih.biClrImportant = 0;
+	 
+		 fwrite(&bmpfh,sizeof(BITMAPFILEHEADER),1,bmpFile);
+		 fwrite(&bmpih,sizeof(BITMAPINFOHEADER),1,bmpFile);
+	 
+		 pImage = colorimg + width*(height-1)*3;
+	 
+		 delta = rwbytes - width*3;
+		 for (i=0; i<height; i++)
+		 {
+			 //bmpFile.Write(pImage, width);
+			 fwrite(pImage,width*3,1,bmpFile);
+			 if (delta>0)
+			 {
+				 //bmpFile.Write(temp, delta);
+				 fwrite(temp,delta,1,bmpFile);
+			 }
+			 pImage -= (width*3);
+		 }
+	 
+		 //  bmpFile.Close();
+		 fclose(bmpFile);
+#endif
+	 
+		 return 0;
+	 }
+	 int WriteFloatBmp(char* bmpFileName, int width, int height, float *greyimg)
+	 {
+		 int y, x;
+		 unsigned char *greybuff = (unsigned char *)malloc(width*height);
+		 float fmax = -1000000.0;
+		 for (y = 0; y < width * height; y++)
+		 {
+			 if (greyimg[y] > fmax) fmax = greyimg[y];
+		 }
+	 
+		 float fscale = 255.0 / fmax;
+		 for (y = 0; y < width * height; y++)
+		 {
+			 greybuff[y] = (unsigned char)greyimg[y] * fscale;
+		 }
+	 
+		 WriteGreyBmp(bmpFileName, width, height, greybuff);
+	 
+		 if (greybuff) free(greybuff);
+	 
+		 return 0;
+	 }
+
+	 int WriteShortBmp(char* bmpFileName, int width, int height, short *greyimg)
+	 {
+			  int y, x;
+			  unsigned char *greybuff = (unsigned char *)malloc(width*height);
+			  
+			  short fmax = -1000000;
+			  short fmin = 1000000;
+			  
+			  for (y = 0; y < width * height; y++)
+			  {
+				  if (greyimg[y] > fmax) fmax = greyimg[y];
+				  if (greyimg[y] < fmin) fmin = greyimg[y];
+			  }
+		  
+			  float fscale = 255.0 / (float)(fmax - fmin);
+			  
+			  for (y = 0; y < width * height; y++)
+			  {
+				  greybuff[y] = (unsigned char)((greyimg[y] - fmin)  * fscale);
+			  }
+		  
+			  WriteGreyBmp(bmpFileName, width, height, greybuff);
+		  
+			  if (greybuff) free(greybuff);
+		  
+			  return 0;
+	}
+	 
+
+#endif							 
 
 #define OFFSET(x) offsetof(H264Context, x)
 #define VD AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_DECODING_PARAM

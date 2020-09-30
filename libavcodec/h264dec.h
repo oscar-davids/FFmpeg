@@ -67,6 +67,7 @@
  */
 #define MAX_SLICES 32
 
+#define EXTRACT_DCT 1
 #ifdef ALLOW_INTERLACE
 #define MB_MBAFF(h)    (h)->mb_mbaff
 #define MB_FIELD(sl)  (sl)->mb_field_decoding_flag
@@ -402,6 +403,9 @@ typedef struct H264Context {
 
     uint16_t *slice_table;      ///< slice_table_base + 2*mb_stride + 1
 
+#if EXTRACT_DCT
+	int16_t  *dcmatrix; //dct matrix for frame
+#endif	
     // interlacing specific flags
     int mb_aff_frame;
     int picture_structure;

@@ -187,6 +187,22 @@ static av_noinline void FUNC(hl_decode_mb)(const H264Context *h, H264SliceContex
             }
         }
 
+#if EXTRACT_DCT		
+		int mbstart_x = sl->mb_x * 16;
+    	int mbstart_y = sl->mb_y * 16;
+    	int mbspep_x  = h->width_from_caller;
+		short* pdstart = h->dcmatrix + mbspep_x * mbstart_y + mbstart_x;
+		short* psstart = sl->mb;
+		
+		if(h->dcmatrix && mbstart_y <= h->height_from_caller - 16)		
+		{
+			for(i = 0; i < 16; i++){
+				memcpy(pdstart, psstart, sizeof(short) * 16);
+				pdstart += mbspep_x;
+				psstart += 16;
+			}
+		}
+#endif
         hl_decode_mb_idct_luma(h, sl, mb_type, SIMPLE, transform_bypass,
                                PIXEL_SHIFT, block_offset, linesize, dest_y, 0);
 
