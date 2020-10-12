@@ -32,7 +32,7 @@
 #define NORMAL_HEIGHT		270	//normalize height
 #define MAX_FEATURE_NUM		5	//final score array
 
-
+/*
 typedef struct FramePairList {
 	int		width;
 	int		height;
@@ -45,7 +45,7 @@ typedef struct FramePairList {
 	double  *diffmatrix; //used in Opencv engine
 	double	*finalscore;
 } FramePairList;
-
+*/
 
 typedef struct LVPDiffContext{
     const AVClass *class;
