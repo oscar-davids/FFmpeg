@@ -1166,6 +1166,11 @@ int avfilter_graph_request_oldest(AVFilterGraph *graph);
 	
 int avfilter_run_calcdiffmatrix(void *framebufflist);
 
+/*	Calculate difference feature matrix with gpu and score beetween two video fame buffer list
+	return value 0: success -1: fail */
+	
+int avfilter_run_calcdiffmatrix_cuda(void *framebufflist);
+
 /**
  * @}
  */

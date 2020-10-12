@@ -249,6 +249,7 @@ External library support:
   --enable-libopencore-amrnb enable AMR-NB de/encoding via libopencore-amrnb [no]
   --enable-libopencore-amrwb enable AMR-WB decoding via libopencore-amrwb [no]
   --enable-libopencv       enable video filtering via libopencv [no]
+  --enable-libopencv_cuda  enable video filtering via libopencv-cuda [no]  
   --enable-libopenh264     enable H.264 encoding via OpenH264 [no]
   --enable-libopenjpeg     enable JPEG 2000 de/encoding via OpenJPEG [no]
   --enable-libopenmpt      enable decoding tracked files via libopenmpt [no]
@@ -1781,6 +1782,7 @@ EXTERNAL_LIBRARY_LIST="
     libmp3lame
     libmysofa
     libopencv
+    libopencv_cuda
     libopenh264
     libopenjpeg
     libopenmpt
@@ -3512,6 +3514,7 @@ ladspa_filter_deps="ladspa libdl"
 lensfun_filter_deps="liblensfun version3"
 lv2_filter_deps="lv2"
 lvpdiff_filter_deps="libopencv"
+lvpdiff_cuda_filter_deps="libopencv_cuda"
 mcdeint_filter_deps="avcodec gpl"
 movie_filter_deps="avcodec avformat"
 mpdecimate_filter_deps="gpl"

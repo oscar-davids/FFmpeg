@@ -294,6 +294,7 @@ OBJS-$(CONFIG_LUT3D_FILTER)                  += vf_lut3d.o framesync.o
 OBJS-$(CONFIG_LUTRGB_FILTER)                 += vf_lut.o
 OBJS-$(CONFIG_LUTYUV_FILTER)                 += vf_lut.o
 OBJS-$(CONFIG_LVPDIFF_FILTER)                += vf_lvpdiff.o framesync.o
+OBJS-$(CONFIG_LVPDIFF_CUDA_FILTER)           += vf_lvpdiff_cuda.o framesync.o
 OBJS-$(CONFIG_MASKEDCLAMP_FILTER)            += vf_maskedclamp.o framesync.o
 OBJS-$(CONFIG_MASKEDMAX_FILTER)              += vf_maskedminmax.o framesync.o
 OBJS-$(CONFIG_MASKEDMERGE_FILTER)            += vf_maskedmerge.o framesync.o
