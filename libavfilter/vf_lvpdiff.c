@@ -46,6 +46,13 @@ typedef struct FramePairList {
 	double	*finalscore;
 } FramePairList;
 */
+enum
+{
+	CALC_MODESKIP =0,
+	CALC_MODECPU  =1,
+	CALC_MODECUDA =2,
+	CALC_MODEMAX
+};
 
 typedef struct LVPDiffContext{
     const AVClass *class;
@@ -54,6 +61,9 @@ typedef struct LVPDiffContext{
     FILE *stats_file;
     char *stats_file_str;
 	int   stats_version;
+
+	char *calcmode_str;  //skip,cpu(default),cuda
+	int   calcmode_flag; //0   ,1           ,2
 	
 	uint64_t nb_frames; //total sync number
 	int is_rgb;
@@ -79,6 +89,7 @@ typedef struct LVPDiffContext{
 static const AVOption lvpdiff_options[] = {
     {"stats_file", "Set file where to store per-frame difference information", OFFSET(stats_file_str), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 0, FLAGS },
     {"f",          "Set file where to store per-frame difference information", OFFSET(stats_file_str), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 0, FLAGS },
+    {"calcmode",   "Set difference feature calc mode", 						   OFFSET(calcmode_str), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 0, FLAGS },
     {"stats_version", "Set the format version for the stats file.",            OFFSET(stats_version),  AV_OPT_TYPE_INT,    {.i64=1},    1, 1, FLAGS },
     { NULL }
 };
@@ -116,7 +127,9 @@ static void init_randomidx(LVPDiffContext *s)
 		get_random(rdx, s->fps, CKNUM_PER_SEC);
 		for (int j = 0; j < CKNUM_PER_SEC; j++){
 			
-			s->randomIdx[i*CKNUM_PER_SEC + j] = s->fps * i + rdx[j];
+			s->randomIdx[i*CKNUM_PER_SEC + j] = s->fps * i + rdx[j];			
+			//debug oscar
+			s->randomIdx[i*CKNUM_PER_SEC + j] = s->fps * i + j * (s->fps / 4);
 			//debug oscar
 			//av_log(NULL, AV_LOG_DEBUG, "master rand idx(%d) = %d\n", i*CKNUM_PER_SEC + j, s->randomIdx[i*CKNUM_PER_SEC + j]);
 		}
@@ -186,7 +199,7 @@ static int do_lvpdiff(FFFrameSync *fs)
     if (!ref)
         return ff_filter_frame(ctx->outputs[0], master);
 
-	if(is_checkframe(s,ctx->outputs[0]->frame_count_in)){
+	if(s->calcmode_flag > 0 && is_checkframe(s,ctx->outputs[0]->frame_count_in)){
 		//make compair frames
 		sws_scale(s->sws_rgb_scale1, (const uint8_t **)master->data, master->linesize,
                   0, master->height, (uint8_t * const*)(&s->swscaleframe1->data),
@@ -271,6 +284,12 @@ static av_cold int init(AVFilterContext *ctx)
             }
         }
     }
+	s->calcmode_flag = CALC_MODECPU;//cpu mode
+	if (s->calcmode_str) {
+		if(strcmp(s->calcmode_str,"skip") == 0) s->calcmode_flag = CALC_MODESKIP;
+		else if(strcmp(s->calcmode_str,"cpu") == 0) s->calcmode_flag = CALC_MODECPU;
+		else if(strcmp(s->calcmode_str,"cuda") == 0) s->calcmode_flag = CALC_MODECUDA;
+	}	
 
     s->fs.on_event = do_lvpdiff;
     return 0;
@@ -361,7 +380,7 @@ static av_cold void uninit(AVFilterContext *ctx)
 	int i;
     LVPDiffContext *s = ctx->priv;
 	
-	if(s->compInfo.samplecount > 0){
+	if(s->calcmode_flag> 0 && s->compInfo.samplecount > 0){
 		//call opencv api at here
 		
 		//creat feature matrix(feature * samplecount)	
@@ -370,10 +389,18 @@ static av_cold void uninit(AVFilterContext *ctx)
 		//creat final score buffer
 		s->compInfo.finalscore = (double*)malloc(sizeof(double)*s->compInfo.featurecount);
 
-		cvCalcDiffMatrix((void*)&s->compInfo);
+		if(s->calcmode_flag == CALC_MODECUDA){
+			cvCalcDiffMatrixwithCuda((void*)&s->compInfo);
+			//debug oscar
+			av_log(NULL, AV_LOG_ERROR, "do_lvpdiff CUDA mode comapare frame count %d\n", s->compInfo.samplecount);
+		}
+		if(s->calcmode_flag == CALC_MODECPU){
+			cvCalcDiffMatrix((void*)&s->compInfo);
+			//debug oscar
+			av_log(NULL, AV_LOG_ERROR, "do_lvpdiff CPU mode comapare frame count %d\n", s->compInfo.samplecount);
+		}
 
-		//debug oscar
-		av_log(NULL, AV_LOG_ERROR, "do_lvpdiff comapare frame count %d\n", s->compInfo.samplecount);
+		
 		for(i = 0 ; i < s->compInfo.featurecount; i++){
 			av_log(NULL, AV_LOG_ERROR, "feature(%d) = %lf\n", i, s->compInfo.finalscore[i]);
 		}

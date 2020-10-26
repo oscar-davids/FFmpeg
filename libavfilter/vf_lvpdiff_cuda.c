@@ -118,6 +118,8 @@ static void init_randomidx(LVPDiffContext *s)
 			
 			s->randomIdx[i*CKNUM_PER_SEC + j] = s->fps * i + rdx[j];
 			//debug oscar
+			s->randomIdx[i*CKNUM_PER_SEC + j] = s->fps * i + j * (s->fps / 4);
+			//debug oscar
 			//av_log(NULL, AV_LOG_DEBUG, "master rand idx(%d) = %d\n", i*CKNUM_PER_SEC + j, s->randomIdx[i*CKNUM_PER_SEC + j]);
 		}
 	}	
