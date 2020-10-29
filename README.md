@@ -60,7 +60,7 @@ such as audio, video, subtitles and related metadata.
 
 These are packages required for compiling, but you can remove them when you are done if you prefer:
 
-- install packages
+- install pre-built packages
 
 	sudo apt-get update -qq && sudo apt-get -y install autoconf automake build-essential cmake \
   git-core libass-dev libfreetype6-dev libsdl2-dev libtool libva-dev libvdpau-dev libvorbis-dev\
@@ -129,6 +129,70 @@ Now opencv support to build on ubuntu GUI, so need ubuntu os with GUI.
   
   **remark some case need to set env:  export LD_LIBRARY_PATH="$HOME/ffmpeg_build/lib/:/usr/local/lib:$LD_LIBRARY_PATH"
  
+ ## Build FFmpeg with lvpdiff_cuda filter on ubuntu18.04
+
+1. prerequest
+
+  - install nvidia cuda driver and SDK
+  
+  	https://developer.nvidia.com/cuda-downloads
+  
+  - install pre-built packages (same as above)  
+  
+  - build and install OpenCV CUDA Library
+  
+	  clone source code 
+
+		git clone https://github.com/oscar-davids/opencv
+
+	  git checkout dev-lvpdiff-cuda
+
+	  build and install openCV
+
+	  cd opencv
+
+	  mkdir build
+
+	  cd build
+
+	  cmake-gui ..
+
+	  ![Alt text](ubuntu-cmake-gui-setting.png?raw=true "")
+
+	  #in build directory
+
+	  sudo make -j8
+
+	  #install to /usr/local/bin
+
+	  sudo make install
+	  
+2. FFmpeg Compilation 
+
+- clone source code 
+
+  git clone https://github.com/oscar-davids/FFmpeg
+  
+  git checkout dev-lvpdiff-cuda
+  
+- build 
+
+  ./configure --prefix="$HOME/ffmpeg_build" --enable-shared --enable-libopencv --enable-libopencv-cuda
+
+  make && make install
+  
+3. execute
+ 
+  cd $HOME/ffmpeg_build/bin
+  
+  ffmpeg -i main.mp4 -i ref.mp4 -lavfi  "lvpdiff" -f null -
+  
+  ffmpeg -i main.mp4 -i ref.mp4 -lavfi  lvpdiff="calcmode=cuda:stats_file=stats.log" -f null -
+  
+  ** calcmode(skip, cpu, cuda)  
+  
+  **remark some case need to set env:  export LD_LIBRARY_PATH="$HOME/ffmpeg_build/lib/:/usr/local/lib:$LD_LIBRARY_PATH"  
+  
   
 ## Build FFmpeg with lvpdiff filter on Windows10
 
@@ -169,6 +233,12 @@ Now opencv support to build on ubuntu GUI, so need ubuntu os with GUI.
     Add C:\workspace\windows to PATH environment variable (setx PATH "%PATH%;C:\workspace\windows)
     
     Ready to compile
+    
+- Install nvidia driver and cuda SDK(option)
+
+    https://developer.nvidia.com/cuda-toolkit
+
+    https://developer.nvidia.com/rdp/cudnn-download    
   
 - Install OpenCV 
 
@@ -176,15 +246,9 @@ Now opencv support to build on ubuntu GUI, so need ubuntu os with GUI.
   
 	git clone https://github.com/oscar-davids/opencv
   
-  git checkout dev-lvpdiff
+  git checkout dev-lvpdiff or (dev-lvpdiff-cuda)
 
   build and install openCV using cmake-gui and visualstudio compile tool   
-
-- Install cuda and cudnn(option)
-
-https://developer.nvidia.com/cuda-toolkit
-
-https://developer.nvidia.com/rdp/cudnn-download
 
 2. Compilation 
 
@@ -210,34 +274,21 @@ https://developer.nvidia.com/rdp/cudnn-download
 	
 	cp  -r $opencvroot/lib/opencv_core.lib opencv_imageproc.lib /usr/local/lib/
 	
-	  
+	(cuda option) cp  -r $opencvroot/lib/*.lib  /usr/local/lib/
+		  
 - clone source code 
 
   git clone https://github.com/oscar-davids/FFmpeg
   
-  git checkout dev-lvpdiff
+  git checkout dev-lvpdiff or dev-lvpdiff-cuda
   
 - copy cuda c headfiles and lib(option)
 
-  cd detectorffmpeg
-    
-  mkdir nv_sdk
-  
-  cp $cudaroot/include nv_sdk
-  
-  cp $cudaroot/lib/x64 nv_sdk/x64    
-  
-- install nv-codec-headers(remark PKG_CONFIG_PATH)
-
-	cd detectorffmpeg
-
-	cd nv-codec-headers/
-
-	make install PREFIX=/usr/local
-
-	cd ..
-  
-	PKG_CONFIG_PATH="/usr/local/lib/pkgconfig" ./configure --toolchain=msvc --arch=x86_64 --enable-cuda --enable-cuvid --enable-nvenc --enable-nonfree --enable-libopencv --disable-libnpp --extra-cflags=-I/usr/local/include --extra-cflags=-I../nv_sdk/include --extra-ldflags=-L/usr/lib --extra-ldflags=-L/usr/local/lib --extra-ldflags=-L../nv_sdk/x64
+  	cd FFmpeg    
+	
+	./configure --toolchain=msvc --arch=x86_64 --enable-libopencv --enable-shared --extra-cflags=-I/usr/local/include --extra-ldflags='-LIBPATH:/usr/lib' --extra-ldflags='-LIBPATH:/usr/local/lib'
+	
+	(cuda option) --enable-libopencv-cuda
 
 	make -j 8
 	
@@ -246,6 +297,8 @@ https://developer.nvidia.com/rdp/cudnn-download
   	ffmpeg -i main.mp4 -i ref.mp4 -lavfi  "lvpdiff" -f null -
   
   	ffmpeg -i main.mp4 -i ref.mp4 -lavfi  lvpdiff="stats_file=stats.log" -f null -
+	
+	ffmpeg -i main.mp4 -i ref.mp4 -lavfi  lvpdiff="calcmode=cuda:stats_file=stats.log" -f null -
   
 
 Reference
