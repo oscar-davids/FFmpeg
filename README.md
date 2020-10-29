@@ -157,7 +157,8 @@ Now opencv support to build on ubuntu GUI, so need ubuntu os with GUI.
 
 	  cmake-gui ..
 
-	  ![Alt text](ubuntu-cmake-gui-setting.png?raw=true "")
+	  ![Alt text](opencvcuda01.jpg?raw=true "")
+	  ![Alt text](opencvcuda02.jpg?raw=true "")
 
 	  #in build directory
 
