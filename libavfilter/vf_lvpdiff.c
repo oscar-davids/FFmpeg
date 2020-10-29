@@ -129,7 +129,7 @@ static void init_randomidx(LVPDiffContext *s)
 			
 			s->randomIdx[i*CKNUM_PER_SEC + j] = s->fps * i + rdx[j];			
 			//debug oscar
-			s->randomIdx[i*CKNUM_PER_SEC + j] = s->fps * i + j * (s->fps / 4);
+			//s->randomIdx[i*CKNUM_PER_SEC + j] = s->fps * i + j * (s->fps / 4);
 			//debug oscar
 			//av_log(NULL, AV_LOG_DEBUG, "master rand idx(%d) = %d\n", i*CKNUM_PER_SEC + j, s->randomIdx[i*CKNUM_PER_SEC + j]);
 		}
@@ -402,12 +402,16 @@ static av_cold void uninit(AVFilterContext *ctx)
 
 		
 		for(i = 0 ; i < s->compInfo.featurecount; i++){
-			av_log(NULL, AV_LOG_ERROR, "feature(%d) = %lf\n", i, s->compInfo.finalscore[i]);
+			av_log(NULL, AV_LOG_ERROR, "feature(%d) = %.5f\n", i, s->compInfo.finalscore[i]);
 		}
 
 		if (s->stats_file) {
+
+			fprintf(s->stats_file, "feature(fps):%d ",s->fps);
+			fprintf(s->stats_file, "feature(w):%d ",s->compInfo.width);
+			fprintf(s->stats_file, "feature(h):%d ",s->compInfo.height);			
 			for (i = 0; i < s->compInfo.featurecount; i++) {				
-				fprintf(s->stats_file, "feature(%02d):%0.lf ",i , s->compInfo.finalscore[i]);
+				fprintf(s->stats_file, "feature(%02d):%.5f ",i , s->compInfo.finalscore[i]);
 			}			
 			fprintf(s->stats_file, "\n");
 		}
