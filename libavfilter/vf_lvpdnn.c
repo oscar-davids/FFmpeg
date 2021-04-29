@@ -370,18 +370,20 @@ static int copy_from_dnn_to_frame(LVPDnnContext *ctx, AVFrame *frame)
 static int filter_frame(AVFilterLink *inlink, AVFrame *in)
 {
     char slvpinfo[256] = {0,};
+	char tokeninfo[64] = {0,};
     AVFilterContext *context  = inlink->dst;
     AVFilterLink *outlink = context->outputs[0];
     LVPDnnContext *ctx = context->priv;
     DNNReturnType dnn_result;
     AVDictionary **metadata = &in->metadata;
-
-    ctx->framenum ++;
+	int i;
+	
+    ctx->framenum ++;	
 
     if(ctx->sample_rate > 0 && ctx->framenum % ctx->sample_rate == 0)
     {
         copy_from_frame_to_dnn(ctx, in);
-
+		
         dnn_result = (ctx->dnn_module->execute_model)(ctx->model, &ctx->output, 1);
         if (dnn_result != DNN_SUCCESS){
             av_log(ctx, AV_LOG_ERROR, "failed to execute model\n");
@@ -392,19 +394,22 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
         DNNData *dnn_output = &ctx->output;
         float* pfdata = dnn_output->data;
         int lendata = ctx->output.height;
-        //            
-        if(lendata >= 2 && pfdata[0] >= ctx->valid_threshold)
-        {
-            snprintf(slvpinfo, sizeof(slvpinfo), "probability %.2f", pfdata[0]);  
-           
-            av_dict_set(metadata, "lavfi.lvpdnn.text", slvpinfo, 0);
+        // need all classification as metadata
+        for(i=0; i<lendata; i++)
+		{		
+			snprintf(tokeninfo, sizeof(tokeninfo), "%.2f,", pfdata[i]);  
+			strcat(slvpinfo,tokeninfo);		
+        }
+		if(lendata > 0){
+			av_dict_set(metadata, "lavfi.lvpdnn.text", slvpinfo, 0);
             if(ctx->logfile)
             {
-                fprintf(ctx->logfile,"%s\n",slvpinfo);                
-            }      
-        }
-        //for DEBUG
-        //av_log(0, AV_LOG_INFO, "frame contents seems like aaa as %s\n",slvpinfo);        
+                fprintf(ctx->logfile,"%s\n",slvpinfo);
+            }
+			//for DEBUG
+		    //av_log(0, AV_LOG_ERROR, "frame contents id:prob %s\n",slvpinfo);
+		}
+
     }
 
     if(ctx->logfile && ctx->framenum % 20 == 0)
