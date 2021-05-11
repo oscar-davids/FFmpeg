@@ -396,19 +396,19 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
         int lendata = ctx->output.height;
         // need all classification as metadata
         for(i=0; i<lendata; i++)
-		{		
-			snprintf(tokeninfo, sizeof(tokeninfo), "%.2f,", pfdata[i]);  
-			strcat(slvpinfo,tokeninfo);		
+	{		
+		snprintf(tokeninfo, sizeof(tokeninfo), "%.2f,", pfdata[i]);  
+		strcat(slvpinfo,tokeninfo);		
         }
-		if(lendata > 0){
-			av_dict_set(metadata, "lavfi.lvpdnn.text", slvpinfo, 0);
-            if(ctx->logfile)
-            {
-                fprintf(ctx->logfile,"%s\n",slvpinfo);
-            }
-			//for DEBUG
-		    //av_log(0, AV_LOG_ERROR, "frame contents id:prob %s\n",slvpinfo);
-		}
+	if(lendata > 0){
+		av_dict_set(metadata, "lavfi.lvpdnn.text", slvpinfo, 0);
+            	if(ctx->logfile)
+            	{
+                	fprintf(ctx->logfile,"%s\n",slvpinfo);
+            	}
+		//for DEBUG
+		//av_log(0, AV_LOG_ERROR, "frame contents id:prob %s\n",slvpinfo);
+	}
 
     }
 
