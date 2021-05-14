@@ -13023,7 +13023,7 @@ Specify which filter to use. This option accepts the following values:
 lvpclassify filter. To conduct lvpclassify filter, you need to use a classify model.
 
 @item lvpodetect
-lvpodetect filter. To conduct object detect filter, you need to use a object detect model.
+lvpodetect filter(reservation). To conduct object detect filter, you need to use a object detect model.
 @end table
 
 Default value is @samp{lvpclassify}.
@@ -13034,7 +13034,7 @@ the following values:
 
 @table @samp
 @item native
-Native implementation of DNN loading and execution.
+Native implementation of DNN loading and execution. Native implementation is under testing, so tensorflow backend is recommended.
 
 @item tensorflow
 TensorFlow backend. To enable this backend you
@@ -13056,10 +13056,12 @@ Set the input name of the dnn network.
 Set the output name of the dnn network.
 
 @item sample
-Set the sample rate for inference.
+Set the sample rate for inference. The filter is executed at this sample frame interval.
+Default is 1. Allowed range is from 1 to 200. Smaller is slower.
 
 @item threshold
-Set the threshold for inference.
+Set the threshold for inference log.
+Default is 0.5. Allowed range is from 0.1 to 1.0.
 
 @item log
 Set the log file path for save inference results.
@@ -13080,9 +13082,9 @@ ffmpeg -vsync 0 -hwaccel cuvid -c:v h264_cuvid -i input.mp4 -c:a copy -vf lvpdnn
 @end example
 
 @item
-Mixed transcoding:
+Mixed transcoding(software decoding and hardware encoding):
 @example
-ffmpeg -vsync 0 -c:v h264_cuvid -i input.mp4 -vf lvpdnn=model=tmodel.pb:input=input:output=outshape:sample=1:threshold=0.5:log=outlog.txt -c:v h264_nvenc out.mp4
+ffmpeg -i input.mp4 -vf lvpdnn=model=tmodel.pb:input=input:output=outshape:sample=1:threshold=0.5:log=outlog.txt -c:v h264_nvenc out.mp4
 @end example
 
 @item

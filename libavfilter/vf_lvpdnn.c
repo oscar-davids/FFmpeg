@@ -20,7 +20,7 @@
 
 /**
  * @file 
- * implementing livepeer frame filter using deep convolutional networks. 
+ * Implements livepeer frame filter using deep convolutional networks. 
  */
 
 #include "libavformat/avio.h"
@@ -36,6 +36,7 @@
 #include "formats.h"
 #include "internal.h"
 
+typedef enum {LVPDNN_CLASSIFY, LVPDNN_ODETECT} LVPDNNType;
 
 typedef struct LVPDnnContext {
     const AVClass *class;
@@ -64,7 +65,7 @@ typedef struct LVPDnnContext {
 
     FILE                *logfile;
     int                 framenum;
-    //
+    
     struct SwsContext   *sws_grayf32_to_gray8;    
     int                 sws_uv_height;
 
@@ -73,10 +74,10 @@ typedef struct LVPDnnContext {
 #define OFFSET(x) offsetof(LVPDnnContext, x)
 #define FLAGS AV_OPT_FLAG_FILTERING_PARAM | AV_OPT_FLAG_VIDEO_PARAM
 static const AVOption lvpdnn_options[] = {
-    { "filter_type", "filter type(inference/detect)",   OFFSET(filter_type),    AV_OPT_TYPE_INT,        { .i64 = 0 },    0, 1, FLAGS, "type" },
-    { "inference",   "inference filter flag",           0,                      AV_OPT_TYPE_CONST,      { .i64 = 0 },    0, 0, FLAGS, "type" },
-    { "detect",      "detect filter flag",              0,                      AV_OPT_TYPE_CONST,      { .i64 = 1 },    0, 0, FLAGS, "type" },
-    { "dnn_backend", "DNN backend",                OFFSET(backend_type),     AV_OPT_TYPE_INT,           { .i64 = 0 },    0, 1, FLAGS, "backend" },
+    { "filter_type", "filter type(lvpclassify/lvpodetect)",   OFFSET(filter_type),    AV_OPT_TYPE_INT,    { .i64 = 0 },    0, 1, FLAGS, "type" },
+    { "lvpclassify",    "classify filter flag",           0,                      AV_OPT_TYPE_CONST,      { .i64 = 0 },    0, 0, FLAGS, "type" },
+    { "lvpodetect",     "detect filter flag",             0,                      AV_OPT_TYPE_CONST,      { .i64 = 1 },    0, 0, FLAGS, "type" },
+    { "dnn_backend", "DNN backend",                OFFSET(backend_type),     AV_OPT_TYPE_INT,           { .i64 = 1 },    0, 1, FLAGS, "backend" },
     { "native",      "native backend flag",        0,                        AV_OPT_TYPE_CONST,         { .i64 = 0 },    0, 0, FLAGS, "backend" },
 #if (CONFIG_LIBTENSORFLOW == 1)
     { "tensorflow",  "tensorflow backend flag",    0,                        AV_OPT_TYPE_CONST,         { .i64 = 1 },    0, 0, FLAGS, "backend" },
@@ -84,8 +85,8 @@ static const AVOption lvpdnn_options[] = {
     { "model",       "path to model file",          OFFSET(model_filename),   AV_OPT_TYPE_STRING,       { .str = NULL }, 0, 0, FLAGS },
     { "input",       "input name of the model",     OFFSET(model_inputname),  AV_OPT_TYPE_STRING,       { .str = NULL }, 0, 0, FLAGS },
     { "output",      "output name of the model",    OFFSET(model_outputname), AV_OPT_TYPE_STRING,       { .str = NULL }, 0, 0, FLAGS },
-    { "sample","detector one every sample frames",  OFFSET(sample_rate),    AV_OPT_TYPE_INT,            { .i64 = 1   },  0, 2000, FLAGS },
-    { "threshold",  "threshold for verify",         OFFSET(valid_threshold),  AV_OPT_TYPE_DOUBLE,       { .dbl = 0.5 },  0, 2, FLAGS },
+    { "sample","detector one every sample frames",  OFFSET(sample_rate),    AV_OPT_TYPE_INT,            { .i64 = 1   },  0, 200, FLAGS },
+    { "threshold",  "threshold for verify",         OFFSET(valid_threshold),  AV_OPT_TYPE_DOUBLE,       { .dbl = 0.5 },  0.1, 1, FLAGS },
     { "log",         "path name of the log",        OFFSET(log_filename), AV_OPT_TYPE_STRING,           { .str = NULL }, 0, 0, FLAGS },    
     { NULL }
 };
@@ -95,7 +96,10 @@ AVFILTER_DEFINE_CLASS(lvpdnn);
 static av_cold int init(AVFilterContext *context)
 {
     LVPDnnContext *ctx = context->priv;
-
+    if (ctx->filter_type == LVPDNN_ODETECT) {
+        av_log(ctx, AV_LOG_ERROR, "Detect filter will be implemented in the future.\n");
+        return AVERROR(EINVAL);
+    }
     if (!ctx->model_filename) {
         av_log(ctx, AV_LOG_ERROR, "model file for network is not specified\n");
         return AVERROR(EINVAL);
@@ -108,13 +112,15 @@ static av_cold int init(AVFilterContext *context)
         av_log(ctx, AV_LOG_ERROR, "output name of the model network is not specified\n");
         return AVERROR(EINVAL);
     }
-
-    if (!ctx->log_filename) {
-        av_log(ctx, AV_LOG_INFO, "output file for log is not specified\n");
-        //return AVERROR(EINVAL);
+    
+    if(ctx->log_filename) {        
+        ctx->logfile = fopen(ctx->log_filename, "w");
     }
-
-    ctx->backend_type = 1;
+    else {
+        ctx->logfile = NULL;
+        av_log(ctx, AV_LOG_INFO, "output file for log is not specified\n");
+    }
+    
     ctx->dnn_module = ff_get_dnn_module(ctx->backend_type);
     if (!ctx->dnn_module) {
         av_log(ctx, AV_LOG_ERROR, "could not create DNN module for requested backend\n");
@@ -130,14 +136,7 @@ static av_cold int init(AVFilterContext *context)
         av_log(ctx, AV_LOG_ERROR, "could not load DNN model\n");
         return AVERROR(EINVAL);
     }
-
-    if(ctx->log_filename){        
-        ctx->logfile = fopen(ctx->log_filename, "w");
-    }
-    else{        
-        ctx->logfile = NULL;
-    }
-
+ 
     ctx->framenum = 0;
 
     return 0;
@@ -146,10 +145,10 @@ static av_cold int init(AVFilterContext *context)
 static int query_formats(AVFilterContext *context)
 {
     static const enum AVPixelFormat pix_fmts[] = {
-        AV_PIX_FMT_RGB24, AV_PIX_FMT_BGR24,AV_PIX_FMT_GRAY8, AV_PIX_FMT_GRAYF32,
+        AV_PIX_FMT_RGB24, AV_PIX_FMT_BGR24, AV_PIX_FMT_GRAY8, AV_PIX_FMT_GRAYF32,
         AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUV422P, AV_PIX_FMT_YUV444P,
         AV_PIX_FMT_YUV410P, AV_PIX_FMT_YUV411P,
-        AV_PIX_FMT_CUDA,AV_PIX_FMT_NONE
+        AV_PIX_FMT_CUDA, AV_PIX_FMT_NONE
     };
     AVFilterFormats *fmts_list = ff_make_format_list(pix_fmts);
     return ff_set_common_formats(context, fmts_list);
@@ -159,8 +158,8 @@ static int prepare_sws_context(AVFilterLink *inlink)
 {
     int result = 0;
     enum AVPixelFormat fmt = inlink->format;
-    AVFilterContext *context    = inlink->dst;
-    LVPDnnContext *ctx = context->priv;    
+    AVFilterContext *context  = inlink->dst;
+    LVPDnnContext *ctx = context->priv;
     DNNDataType input_dt  = ctx->input.dt; 
 
     //check hwframe 
@@ -171,16 +170,16 @@ static int prepare_sws_context(AVFilterLink *inlink)
         result = av_hwframe_transfer_get_formats(inlink->hw_frames_ctx,
                                             AV_HWFRAME_TRANSFER_DIRECTION_FROM,
                                             &formats, 0);
-        if(result <0 ){
-            av_log(ctx, AV_LOG_ERROR, "could not find HW Pixelformat for scale\n");
+        if(result < 0) {
+            av_log(ctx, AV_LOG_ERROR, "could not find HW pixel format for scale\n");
             return result;
         }
 
-        fmt = formats[0];            
+        fmt = formats[0];
         av_freep(&formats);
     }
 
-    av_assert0(input_dt == DNN_FLOAT);     
+    av_assert0(input_dt == DNN_FLOAT);
 
     ctx->sws_rgb_scale = sws_getContext(inlink->w, inlink->h, fmt,
                                             ctx->input.width, ctx->input.height, AV_PIX_FMT_RGB24,
@@ -215,18 +214,18 @@ static int prepare_sws_context(AVFilterLink *inlink)
         return result;
     }
 
-    if (inlink->hw_frames_ctx){
+    if (inlink->hw_frames_ctx) {
         ctx->swframeforHW = av_frame_alloc();
 
         if (!ctx->swframeforHW)
-        return AVERROR(ENOMEM);
+            return AVERROR(ENOMEM);
     }
 
     return 0;
 }
 static int config_input(AVFilterLink *inlink)
 {
-    AVFilterContext *context     = inlink->dst;
+    AVFilterContext *context = inlink->dst;
     LVPDnnContext *ctx = context->priv;
     DNNReturnType result;
     DNNData model_input;
@@ -370,22 +369,22 @@ static int copy_from_dnn_to_frame(LVPDnnContext *ctx, AVFrame *frame)
 static int filter_frame(AVFilterLink *inlink, AVFrame *in)
 {
     char slvpinfo[256] = {0,};
-	char tokeninfo[64] = {0,};
+    char tokeninfo[64] = {0,};
     AVFilterContext *context  = inlink->dst;
     AVFilterLink *outlink = context->outputs[0];
     LVPDnnContext *ctx = context->priv;
     DNNReturnType dnn_result;
     AVDictionary **metadata = &in->metadata;
-	int i;
-	
-    ctx->framenum ++;	
+    int i, bwrite = 0;
+
+    ctx->framenum ++;
 
     if(ctx->sample_rate > 0 && ctx->framenum % ctx->sample_rate == 0)
     {
         copy_from_frame_to_dnn(ctx, in);
-		
+
         dnn_result = (ctx->dnn_module->execute_model)(ctx->model, &ctx->output, 1);
-        if (dnn_result != DNN_SUCCESS){
+        if (dnn_result != DNN_SUCCESS) {
             av_log(ctx, AV_LOG_ERROR, "failed to execute model\n");
             av_frame_free(&in);
             return AVERROR(EIO);
@@ -394,25 +393,20 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
         DNNData *dnn_output = &ctx->output;
         float* pfdata = dnn_output->data;
         int lendata = ctx->output.height;
-        // need all classification as metadata
-        for(i=0; i<lendata; i++)
-	    {		
+
+        // need all inference probability as metadata
+        for(i=0; i<lendata; i++) {
 		    snprintf(tokeninfo, sizeof(tokeninfo), "%.2f,", pfdata[i]);  
-		    strcat(slvpinfo,tokeninfo);		
+		    strcat(slvpinfo,tokeninfo);
+            if(pfdata[i] > ctx->valid_threshold) bwrite = 1;	
         }
-	    if(lendata > 0){
+	    if(lendata > 0) {
 		    av_dict_set(metadata, "lavfi.lvpdnn.text", slvpinfo, 0);
-            if(ctx->logfile)
-            {
+            if(ctx->logfile && bwrite) {
                	fprintf(ctx->logfile,"%s\n",slvpinfo);
             }
-            //for DEBUG
-            //av_log(0, AV_LOG_ERROR, "frame contents id:prob %s\n",slvpinfo);
-	    }
+	    }       
     }
-
-    if(ctx->logfile && ctx->framenum % 20 == 0)
-        fflush(ctx->logfile);
 
     return ff_filter_frame(outlink, in);   
 }
