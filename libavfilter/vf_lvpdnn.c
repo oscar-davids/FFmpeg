@@ -95,7 +95,7 @@ static av_cold int init(AVFilterContext *context)
 {
     LVPDnnContext *ctx = context->priv;
     if (ctx->filter_type == LVPDNN_ODETECT) {
-        av_log(ctx, AV_LOG_ERROR, "Detect filter will be implemented in the future.\n");
+        av_log(ctx, AV_LOG_ERROR, "Object detection filter will be implemented in the future.\n");
         return AVERROR(EINVAL);
     }
     if (!ctx->model_filename) {
@@ -172,7 +172,7 @@ static int prepare_sws_context(AVFilterLink *inlink)
             av_log(ctx, AV_LOG_ERROR, "could not find HW pixel format for scale\n");
             return result;
         }
-
+        //pick the first supported one of possible formats usable in hardware surface for downloading to CPU
         fmt = formats[0];
         av_freep(&formats);
     }
