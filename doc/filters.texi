@@ -13059,10 +13059,6 @@ Set the output name of the dnn network.
 Set the sample rate for inference. The filter is executed at this sample frame interval.
 Default is 1. Allowed range is from 1 to 200. Smaller is slower.
 
-@item threshold
-Set the threshold for inference log.
-Default is 0.5. Allowed range is from 0.1 to 1.0.
-
 @item log
 Set the log file path for save inference results.
 
@@ -13072,25 +13068,25 @@ Set the log file path for save inference results.
 @item
 Software transcoding:
 @example
-ffmpeg -i input.mp4 -vf lvpdnn=model=tmodel.pb:input=input:output=outshape:sample=1:threshold=0.5:log=outlog.txt out.mp4
+ffmpeg -i input.mp4 -vf lvpdnn=model=tmodel.pb:input=input:output=outshape:sample=1:log=outlog.txt out.mp4
 @end example
 
 @item
 Hardware transcoding:
 @example
-ffmpeg -vsync 0 -hwaccel cuvid -c:v h264_cuvid -i input.mp4 -c:a copy -vf lvpdnn=model=tmodel.pb:input=input:output=outshape:sample=1:threshold=0.5:log=outlog.txt -c:v h264_nvenc -b:v 5M out.mp4
+ffmpeg -vsync 0 -hwaccel cuvid -c:v h264_cuvid -i input.mp4 -c:a copy -vf lvpdnn=model=tmodel.pb:input=input:output=outshape:sample=1:log=outlog.txt -c:v h264_nvenc -b:v 5M out.mp4
 @end example
 
 @item
 Mixed transcoding(software decoding and hardware encoding):
 @example
-ffmpeg -i input.mp4 -vf lvpdnn=model=tmodel.pb:input=input:output=outshape:sample=1:threshold=0.5:log=outlog.txt -c:v h264_nvenc out.mp4
+ffmpeg -i input.mp4 -vf lvpdnn=model=tmodel.pb:input=input:output=outshape:sample=1:log=outlog.txt -c:v h264_nvenc out.mp4
 @end example
 
 @item
 ffprobe example:
 @example
-ffprobe -show_entries frame_tags=lavfi.lvpdnn.text -f lavfi -i "movie=input.mp4,lvpdnn=model=tmodel.pb:input=input:output=outshape:sample=1:threshold=5.0"  > lvptext.txt
+ffprobe -show_entries frame_tags=lavfi.lvpdnn.text -f lavfi -i "movie=input.mp4,lvpdnn=model=tmodel.pb:input=input:output=outshape:sample=1"  > lvptext.txt
 @end example
 
 @end itemize

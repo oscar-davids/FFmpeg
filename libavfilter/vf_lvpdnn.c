@@ -46,8 +46,7 @@ typedef struct LVPDnnContext {
     DNNBackendType backend_type;
     char    *model_inputname;
     char    *model_outputname;
-    int     sample_rate;
-    double  valid_threshold;
+    int     sample_rate;    
     char    *log_filename;
 
     DNNModule   *dnn_module;
@@ -85,8 +84,7 @@ static const AVOption lvpdnn_options[] = {
     { "model",       "path to model file",          OFFSET(model_filename),   AV_OPT_TYPE_STRING,       { .str = NULL }, 0, 0, FLAGS },
     { "input",       "input name of the model",     OFFSET(model_inputname),  AV_OPT_TYPE_STRING,       { .str = NULL }, 0, 0, FLAGS },
     { "output",      "output name of the model",    OFFSET(model_outputname), AV_OPT_TYPE_STRING,       { .str = NULL }, 0, 0, FLAGS },
-    { "sample","detector one every sample frames",  OFFSET(sample_rate),    AV_OPT_TYPE_INT,            { .i64 = 1   },  0, 200, FLAGS },
-    { "threshold",  "threshold for verify",         OFFSET(valid_threshold),  AV_OPT_TYPE_DOUBLE,       { .dbl = 0.5 },  0.1, 1, FLAGS },
+    { "sample","detector one every sample frames",  OFFSET(sample_rate),    AV_OPT_TYPE_INT,            { .i64 = 1   },  0, 200, FLAGS },    
     { "log",         "path name of the log",        OFFSET(log_filename), AV_OPT_TYPE_STRING,           { .str = NULL }, 0, 0, FLAGS },    
     { NULL }
 };
@@ -375,7 +373,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     LVPDnnContext *ctx = context->priv;
     DNNReturnType dnn_result;
     AVDictionary **metadata = &in->metadata;
-    int i, bwrite = 0;
+    int i;
 
     ctx->framenum ++;
 
@@ -396,16 +394,15 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
 
         // need all inference probability as metadata
         for(i=0; i<lendata; i++) {
-		    snprintf(tokeninfo, sizeof(tokeninfo), "%.2f,", pfdata[i]);  
-		    strcat(slvpinfo,tokeninfo);
-            if(pfdata[i] > ctx->valid_threshold) bwrite = 1;	
+            snprintf(tokeninfo, sizeof(tokeninfo), "%.2f,", pfdata[i]);  
+            strcat(slvpinfo,tokeninfo);
         }
-	    if(lendata > 0) {
-		    av_dict_set(metadata, "lavfi.lvpdnn.text", slvpinfo, 0);
-            if(ctx->logfile && bwrite) {
+        if(lendata > 0) {
+            av_dict_set(metadata, "lavfi.lvpdnn.text", slvpinfo, 0);
+            if(ctx->logfile != NULL) {
                	fprintf(ctx->logfile,"%s\n",slvpinfo);
             }
-	    }       
+        }
     }
 
     return ff_filter_frame(outlink, in);   
