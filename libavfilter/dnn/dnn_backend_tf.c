@@ -43,6 +43,8 @@ typedef struct TFModel{
     TF_Output *outputs;
     TF_Tensor **output_tensors;
     uint32_t nb_output;
+    //CUDA device ID to support multi GPU
+    uint32_t gpuid;
 } TFModel;
 
 static void free_buffer(void *data, size_t length)
@@ -197,9 +199,13 @@ static DNNReturnType set_input_output_tf(void *model, DNNData *input, const char
     }
 
     sess_opts = TF_NewSessionOptions();
-    // protobuf data for auto memory gpu_options.allow_growth=True and gpu_options.visible_device_list="0" 
-	uint8_t config[7] = { 0x32, 0x5, 0x20, 0x1, 0x2a, 0x01, 0x30 }; 
-	TF_SetConfig(sess_opts, (void*)config, 7, tf_model->status);
+    // protobuf data for auto memory gpu_options.allow_growth=True
+    // gpu_options.visible_device_list="gpuid" , default: 0
+    uint8_t config[7] = { 0x32, 0x5, 0x20, 0x1, 0x2a, 0x01, 0x30 };
+    if(tf_model->gpuid > 0x30) {
+        config[6] = (uint8_t)tf_model->gpuid;
+    }
+    TF_SetConfig(sess_opts, (void*)config, 7, tf_model->status);
 
 
     tf_model->session = TF_NewSession(tf_model->graph, sess_opts, tf_model->status);
@@ -609,7 +615,11 @@ DNNModel *ff_dnn_load_model_tf(const char *model_filename)
     return model;
 }
 
-
+void ff_dnn_set_deviceid_tf(DNNModel *model, uint32_t deviceid)
+{
+    TFModel *tf_model = (TFModel *)model->model;
+    tf_model->gpuid = deviceid;
+}
 
 DNNReturnType ff_dnn_execute_model_tf(const DNNModel *model, DNNData *outputs, uint32_t nb_output)
 {

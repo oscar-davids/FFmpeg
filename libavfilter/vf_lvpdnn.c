@@ -46,8 +46,9 @@ typedef struct LVPDnnContext {
     DNNBackendType backend_type;
     char    *model_inputname;
     char    *model_outputname;
-    int     sample_rate;    
+    int     sample_rate;
     char    *log_filename;
+    int     device_id;
 
     DNNModule   *dnn_module;
     DNNModel    *model;
@@ -81,10 +82,11 @@ static const AVOption lvpdnn_options[] = {
 #if (CONFIG_LIBTENSORFLOW == 1)
     { "tensorflow",  "tensorflow backend flag",    0,                        AV_OPT_TYPE_CONST,         { .i64 = 1 },    0, 0, FLAGS, "backend" },
 #endif
+    { "device",     "GPU id for model loading",     OFFSET(device_id),    AV_OPT_TYPE_INT,              { .i64 = 0   },  0, 16, FLAGS },
     { "model",       "path to model file",          OFFSET(model_filename),   AV_OPT_TYPE_STRING,       { .str = NULL }, 0, 0, FLAGS },
     { "input",       "input name of the model",     OFFSET(model_inputname),  AV_OPT_TYPE_STRING,       { .str = NULL }, 0, 0, FLAGS },
     { "output",      "output name of the model",    OFFSET(model_outputname), AV_OPT_TYPE_STRING,       { .str = NULL }, 0, 0, FLAGS },
-    { "sample","detector one every sample frames",  OFFSET(sample_rate),    AV_OPT_TYPE_INT,            { .i64 = 1   },  0, 200, FLAGS },    
+    { "sample","detector one every sample frames",  OFFSET(sample_rate),    AV_OPT_TYPE_INT,            { .i64 = 1   },  0, 200, FLAGS },
     { "log",         "path name of the log",        OFFSET(log_filename), AV_OPT_TYPE_STRING,           { .str = NULL }, 0, 0, FLAGS },    
     { NULL }
 };
@@ -111,7 +113,7 @@ static av_cold int init(AVFilterContext *context)
         return AVERROR(EINVAL);
     }
     
-    if(ctx->log_filename) {        
+    if(ctx->log_filename) {
         ctx->logfile = fopen(ctx->log_filename, "w");
     }
     else {
@@ -133,6 +135,10 @@ static av_cold int init(AVFilterContext *context)
     if (!ctx->model) {
         av_log(ctx, AV_LOG_ERROR, "could not load DNN model\n");
         return AVERROR(EINVAL);
+    }
+    //setting device id for model loading, 0x30 is tensorflow protobuf value for gpuid 0
+    if (ctx->dnn_module->set_deviceid) {
+        ctx->dnn_module->set_deviceid(ctx->model, 0x30 + ctx->device_id);
     }
  
     ctx->framenum = 0;

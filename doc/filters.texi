@@ -13045,6 +13045,9 @@ need to install the TensorFlow for C library (see
 
 Default value is @samp{tensorflow}.
 
+@item device
+Set the GPU id for model loading.
+
 @item model
 Set path to model file specifying network architecture and its parameters.
 Note that different backends use different file formats. TensorFlow can load files for only its format.
