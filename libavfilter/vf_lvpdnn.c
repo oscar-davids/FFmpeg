@@ -38,6 +38,26 @@
 
 typedef enum {LVPDNN_CLASSIFY, LVPDNN_ODETECT} LVPDNNType;
 
+#define MAX_DEVICE_SIZE 16
+#define MAX_STRING_SIZE 256
+
+typedef struct LVPDnnLoadData {
+    DNNBackendType backend_type;
+     //datas to be pre-loaded
+    DNNModule   *dnn_module;
+    DNNModel    *dnn_model;
+    // input & output of the model at execution time
+    DNNData     *dnn_input;
+    DNNData     *dnn_output;
+
+    char    *model_filename;
+    char    *model_inputname;
+    char    *model_outputname;
+
+}LVPDnnLoadData;
+
+LVPDnnLoadData** loadedmodels = NULL;
+
 typedef struct LVPDnnContext {
     const AVClass *class;
 
@@ -50,13 +70,6 @@ typedef struct LVPDnnContext {
     char    *log_filename;
     int     device_id;
 
-    DNNModule   *dnn_module;
-    DNNModel    *model;
-
-    // input & output of the model at execution time
-    DNNData input;
-    DNNData output;
-    
     struct SwsContext   *sws_rgb_scale;
     struct SwsContext   *sws_gray8_to_grayf32;
 
@@ -65,9 +78,11 @@ typedef struct LVPDnnContext {
 
     FILE                *logfile;
     int                 framenum;
-    
-    struct SwsContext   *sws_grayf32_to_gray8;    
-    int                 sws_uv_height;
+
+    struct SwsContext   *sws_grayf32_to_gray8;
+
+    //pre-loaded datas poiter. don't free at uninit.
+    LVPDnnLoadData      *dnndata;
 
 } LVPDnnContext;
 
@@ -95,23 +110,40 @@ AVFILTER_DEFINE_CLASS(lvpdnn);
 
 static av_cold int init(AVFilterContext *context)
 {
+    LVPDnnLoadData      *dnndata;
     LVPDnnContext *ctx = context->priv;
-    if (ctx->filter_type == LVPDNN_ODETECT) {
+    if(ctx->filter_type == LVPDNN_ODETECT) {
         av_log(ctx, AV_LOG_ERROR, "Object detection filter will be implemented in the future.\n");
         return AVERROR(EINVAL);
     }
-    if (!ctx->model_filename) {
-        av_log(ctx, AV_LOG_ERROR, "model file for network is not specified\n");
+    if(ctx->backend_type == DNN_NATIVE) {
+        av_log(ctx, AV_LOG_ERROR, "Native implementation is under testing.\n");
         return AVERROR(EINVAL);
     }
-    if (!ctx->model_inputname) {
-        av_log(ctx, AV_LOG_ERROR, "input name of the model network is not specified\n");
+    if(ctx->device_id < 0 || ctx->device_id >= MAX_DEVICE_SIZE) {
+        av_log(ctx, AV_LOG_ERROR, "invalid device id. should be between 0 and 15\n");
         return AVERROR(EINVAL);
     }
-    if (!ctx->model_outputname) {
-        av_log(ctx, AV_LOG_ERROR, "output name of the model network is not specified\n");
+    if(loadedmodels == NULL || loadedmodels[ctx->device_id] == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "Didn't initialize dnn model for device id %d\n", ctx->device_id);
         return AVERROR(EINVAL);
     }
+
+    dnndata = loadedmodels[ctx->device_id];
+    if (strcmp(ctx->model_filename, dnndata->model_filename) != 0) {
+        av_log(ctx, AV_LOG_ERROR, "model file for network is not matched with pre-loaded data\n");
+        return AVERROR(EINVAL);
+    }
+    if (strcmp(ctx->model_inputname, dnndata->model_inputname) != 0) {
+        av_log(ctx, AV_LOG_ERROR, "input name of the model network is not matched with pre-loaded data\n");
+        return AVERROR(EINVAL);
+    }
+    if (strcmp(ctx->model_outputname, dnndata->model_outputname) != 0) {
+        av_log(ctx, AV_LOG_ERROR, "output name of the model network is not matched with pre-loaded data\n");
+        return AVERROR(EINVAL);
+    }
+
+    ctx->dnndata = dnndata;
     
     if(ctx->log_filename) {
         ctx->logfile = fopen(ctx->log_filename, "w");
@@ -121,26 +153,6 @@ static av_cold int init(AVFilterContext *context)
         av_log(ctx, AV_LOG_INFO, "output file for log is not specified\n");
     }
     
-    ctx->dnn_module = ff_get_dnn_module(ctx->backend_type);
-    if (!ctx->dnn_module) {
-        av_log(ctx, AV_LOG_ERROR, "could not create DNN module for requested backend\n");
-        return AVERROR(ENOMEM);
-    }
-    if (!ctx->dnn_module->load_model) {
-        av_log(ctx, AV_LOG_ERROR, "load_model for network is not specified\n");
-        return AVERROR(EINVAL);
-    }
-
-    ctx->model = (ctx->dnn_module->load_model)(ctx->model_filename);
-    if (!ctx->model) {
-        av_log(ctx, AV_LOG_ERROR, "could not load DNN model\n");
-        return AVERROR(EINVAL);
-    }
-    //setting device id for model loading, 0x30 is tensorflow protobuf value for gpuid 0
-    if (ctx->dnn_module->set_deviceid) {
-        ctx->dnn_module->set_deviceid(ctx->model, 0x30 + ctx->device_id);
-    }
- 
     ctx->framenum = 0;
 
     return 0;
@@ -164,7 +176,7 @@ static int prepare_sws_context(AVFilterLink *inlink)
     enum AVPixelFormat fmt = inlink->format;
     AVFilterContext *context  = inlink->dst;
     LVPDnnContext *ctx = context->priv;
-    DNNDataType input_dt  = ctx->input.dt; 
+    DNNDataType input_dt  = ctx->dnndata->dnn_input->dt;
 
     //check hwframe 
     if (inlink->hw_frames_ctx)
@@ -186,18 +198,16 @@ static int prepare_sws_context(AVFilterLink *inlink)
     av_assert0(input_dt == DNN_FLOAT);
 
     ctx->sws_rgb_scale = sws_getContext(inlink->w, inlink->h, fmt,
-                                            ctx->input.width, ctx->input.height, AV_PIX_FMT_RGB24,
+                                            ctx->dnndata->dnn_input->width, ctx->dnndata->dnn_input->height, AV_PIX_FMT_RGB24,
                                             SWS_BILINEAR, NULL, NULL, NULL);
 
-    ctx->sws_gray8_to_grayf32 = sws_getContext(ctx->input.width*3,
-                                                ctx->input.height,
+    ctx->sws_gray8_to_grayf32 = sws_getContext(ctx->dnndata->dnn_input->width*3,
+                                                ctx->dnndata->dnn_input->height,
                                                 AV_PIX_FMT_GRAY8,
-                                                ctx->input.width*3,
-                                                ctx->input.height,
+                                                ctx->dnndata->dnn_input->width*3,
+                                                ctx->dnndata->dnn_input->height,
                                                 AV_PIX_FMT_GRAYF32,
                                                 0, NULL, NULL, NULL);  
-
-  
 
     if(ctx->sws_rgb_scale == 0 || ctx->sws_gray8_to_grayf32 == 0)
     {
@@ -210,8 +220,9 @@ static int prepare_sws_context(AVFilterLink *inlink)
         return AVERROR(ENOMEM);
 
     ctx->swscaleframe->format = AV_PIX_FMT_RGB24;
-    ctx->swscaleframe->width  = ctx->input.width;
-    ctx->swscaleframe->height = ctx->input.height;
+    ctx->swscaleframe->width  = ctx->dnndata->dnn_input->width;
+    ctx->swscaleframe->height = ctx->dnndata->dnn_input->height;
+
     result = av_frame_get_buffer(ctx->swscaleframe, 0);
     if (result < 0) {
         av_frame_free(&ctx->swscaleframe);
@@ -231,62 +242,21 @@ static int config_input(AVFilterLink *inlink)
 {
     AVFilterContext *context = inlink->dst;
     LVPDnnContext *ctx = context->priv;
-    DNNReturnType result;
-    DNNData model_input;
     int check;    
-
-    result = ctx->model->get_input(ctx->model->model, &model_input, ctx->model_inputname);
-    if (result != DNN_SUCCESS) {
-        av_log(ctx, AV_LOG_ERROR, "could not get input from the model\n");
-        return AVERROR(EIO);
-    }
-
-    ctx->input.width    = model_input.width;
-    ctx->input.height   = model_input.height;
-    ctx->input.channels = model_input.channels;
-    ctx->input.dt = model_input.dt;
-    
     check = prepare_sws_context(inlink);
     if (check != 0) {
         av_log(ctx, AV_LOG_ERROR, "could not create scale context for the model\n");
         return AVERROR(EIO);
     }
-
-    result = (ctx->model->set_input_output)(ctx->model->model,
-                                        &ctx->input, ctx->model_inputname,
-                                        (const char **)&ctx->model_outputname, 1);
-    
-
-    if (result != DNN_SUCCESS) {
-        av_log(ctx, AV_LOG_ERROR, "could not set input and output for the model\n");
-        return AVERROR(EIO);
-    }
-
-    return 0;
-}
-
-
-static int config_output(AVFilterLink *outlink)
-{
-    AVFilterContext *context = outlink->src;
-    LVPDnnContext *ctx = context->priv;
-    DNNReturnType result;
-
-    // have a try run in case that the dnn model resize the frame
-    result = (ctx->dnn_module->execute_model)(ctx->model, &ctx->output, 1);
-    if (result != DNN_SUCCESS){
-        av_log(ctx, AV_LOG_ERROR, "failed to execute model\n");
-        return AVERROR(EIO);
-    }
-
     return 0;
 }
 
 static int copy_from_frame_to_dnn(LVPDnnContext *ctx, const AVFrame *frame)
 {
+    int bytewidth;
     av_assert0(ctx->swscaleframe != 0);
-    int bytewidth = av_image_get_linesize(ctx->swscaleframe->format, ctx->swscaleframe->width, 0);
-    DNNData *dnn_input = &ctx->input;
+    bytewidth = av_image_get_linesize(ctx->swscaleframe->format, ctx->swscaleframe->width, 0);
+    DNNData *dnn_input = ctx->dnndata->dnn_input;
 
     if(ctx->swframeforHW)
     {
@@ -308,7 +278,7 @@ static int copy_from_frame_to_dnn(LVPDnnContext *ctx, const AVFrame *frame)
 
     if (dnn_input->dt == DNN_FLOAT) {
         sws_scale(ctx->sws_gray8_to_grayf32, (const uint8_t **)ctx->swscaleframe->data, ctx->swscaleframe->linesize,
-                    0, ctx->swscaleframe->height, (uint8_t * const*)(&dnn_input->data),
+                    0, ctx->swscaleframe->height, (uint8_t * const*)(&ctx->dnndata->dnn_input->data),
                     (const int [4]){ctx->swscaleframe->width * 3 * sizeof(float), 0, 0, 0});
     } else {
         av_assert0(dnn_input->dt == DNN_UINT8);
@@ -319,57 +289,6 @@ static int copy_from_frame_to_dnn(LVPDnnContext *ctx, const AVFrame *frame)
     
     return 0;   
 }
-
-static int copy_from_dnn_to_frame(LVPDnnContext *ctx, AVFrame *frame)
-{
-    int bytewidth = av_image_get_linesize(frame->format, frame->width, 0);
-    DNNData *dnn_output = &ctx->output;
-
-    switch (frame->format) {
-    case AV_PIX_FMT_RGB24:
-    case AV_PIX_FMT_BGR24:
-        if (dnn_output->dt == DNN_FLOAT) {
-            sws_scale(ctx->sws_grayf32_to_gray8, (const uint8_t *[4]){(const uint8_t *)dnn_output->data, 0, 0, 0},
-                      (const int[4]){frame->width * 3 * sizeof(float), 0, 0, 0},
-                      0, frame->height, (uint8_t * const*)frame->data, frame->linesize);
-
-        } else {
-            av_assert0(dnn_output->dt == DNN_UINT8);
-            av_image_copy_plane(frame->data[0], frame->linesize[0],
-                                dnn_output->data, bytewidth,
-                                bytewidth, frame->height);
-        }
-        return 0;
-    case AV_PIX_FMT_GRAY8:
-        // it is possible that data type of dnn output is float32,
-        // need to add support for such case when needed.
-        av_assert0(dnn_output->dt == DNN_UINT8);
-        av_image_copy_plane(frame->data[0], frame->linesize[0],
-                            dnn_output->data, bytewidth,
-                            bytewidth, frame->height);
-        return 0;
-    case AV_PIX_FMT_GRAYF32:
-        av_assert0(dnn_output->dt == DNN_FLOAT);
-        av_image_copy_plane(frame->data[0], frame->linesize[0],
-                            dnn_output->data, bytewidth,
-                            bytewidth, frame->height);
-        return 0;
-    case AV_PIX_FMT_YUV420P:
-    case AV_PIX_FMT_YUV422P:
-    case AV_PIX_FMT_YUV444P:
-    case AV_PIX_FMT_YUV410P:
-    case AV_PIX_FMT_YUV411P:
-        sws_scale(ctx->sws_grayf32_to_gray8, (const uint8_t *[4]){(const uint8_t *)dnn_output->data, 0, 0, 0},
-                  (const int[4]){frame->width * sizeof(float), 0, 0, 0},
-                  0, frame->height, (uint8_t * const*)frame->data, frame->linesize);
-        return 0;
-    default:
-        return AVERROR(EIO);
-    }
-
-    return 0;
-}
-
 static int filter_frame(AVFilterLink *inlink, AVFrame *in)
 {
     char slvpinfo[256] = {0,};
@@ -379,24 +298,24 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     LVPDnnContext *ctx = context->priv;
     DNNReturnType dnn_result;
     AVDictionary **metadata = &in->metadata;
+    DNNData *dnn_output;
     int i;
 
     ctx->framenum ++;
 
-    if(ctx->sample_rate > 0 && ctx->framenum % ctx->sample_rate == 0)
-    {
+    if(ctx->sample_rate > 0 && ctx->framenum % ctx->sample_rate == 0) {
         copy_from_frame_to_dnn(ctx, in);
 
-        dnn_result = (ctx->dnn_module->execute_model)(ctx->model, &ctx->output, 1);
+        dnn_result = (ctx->dnndata->dnn_module->execute_model)(ctx->dnndata->dnn_model, ctx->dnndata->dnn_output, 1);
         if (dnn_result != DNN_SUCCESS) {
             av_log(ctx, AV_LOG_ERROR, "failed to execute model\n");
             av_frame_free(&in);
             return AVERROR(EIO);
         }
 
-        DNNData *dnn_output = &ctx->output;
+        dnn_output = ctx->dnndata->dnn_output;
         float* pfdata = dnn_output->data;
-        int lendata = ctx->output.height;
+        int lendata = ctx->dnndata->dnn_output->height;
 
         // need all inference probability as metadata
         for(i=0; i<lendata; i++) {
@@ -411,9 +330,8 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
         }
     }
 
-    return ff_filter_frame(outlink, in);   
+    return ff_filter_frame(outlink, in);
 }
-
 static av_cold void uninit(AVFilterContext *ctx)
 {
     LVPDnnContext *context = ctx->priv;
@@ -421,11 +339,6 @@ static av_cold void uninit(AVFilterContext *ctx)
     sws_freeContext(context->sws_rgb_scale);
     sws_freeContext(context->sws_gray8_to_grayf32);
     sws_freeContext(context->sws_grayf32_to_gray8);
-
-    if (context->dnn_module)
-        (context->dnn_module->free_model)(&context->model);
-
-    av_freep(&context->dnn_module);
 
     if(context->swscaleframe)
         av_frame_free(&context->swscaleframe);
@@ -435,8 +348,170 @@ static av_cold void uninit(AVFilterContext *ctx)
 
     if(context->log_filename && context->logfile)
     {
-        fclose(context->logfile);        
+        fclose(context->logfile);
     }
+}
+static int create_dnnmodel(LVPDnnLoadData** models, char *modelpath, char *input, char *output, int deviceid)
+{
+    int result = 0;
+    LVPDnnLoadData* dnndata;
+
+    if(models[deviceid]) {
+        av_log(NULL, AV_LOG_WARNING, "model data already created before\n");
+        return result;
+    }
+
+    dnndata = (LVPDnnLoadData*)av_mallocz(sizeof(LVPDnnLoadData));
+    if(!dnndata) {
+        av_log(NULL, AV_LOG_ERROR, "could not create LVPDnnLoadData buffer\n");
+        return AVERROR(EIO);
+    }
+
+    models[deviceid] = dnndata;
+    //copy parameters, will use to compare filter argument
+    dnndata->model_filename = (char*)av_mallocz(MAX_STRING_SIZE);
+    dnndata->model_inputname = (char*)av_mallocz(MAX_STRING_SIZE);
+    dnndata->model_outputname = (char*)av_mallocz(MAX_STRING_SIZE);
+    if (!dnndata->model_filename || !dnndata->model_inputname || !dnndata->model_outputname) {
+        av_log(NULL, AV_LOG_ERROR, "could not create parameter string\n");
+        return AVERROR(ENOMEM);
+    }
+
+    strcpy(dnndata->model_filename, modelpath);
+    strcpy(dnndata->model_inputname, input);
+    strcpy(dnndata->model_outputname, output);
+    //init dnn model
+    dnndata->backend_type = DNN_TF;
+    dnndata->dnn_module = ff_get_dnn_module(dnndata->backend_type);
+    if (!dnndata->dnn_module) {
+        av_log(NULL, AV_LOG_ERROR, "could not create DNN module for requested backend\n");
+        return AVERROR(ENOMEM);
+    }
+    //setting device id for model loading, 0x30 is tensorflow protobuf value for gpuid 0
+    if (dnndata->dnn_module->set_deviceid) {
+        dnndata->dnn_module->set_deviceid(0x30 + deviceid);
+    }
+    if (!dnndata->dnn_module->load_model) {
+        av_log(NULL, AV_LOG_ERROR, "load_model for network is not specified\n");
+        return AVERROR(EINVAL);
+    }
+
+    dnndata->dnn_model = (dnndata->dnn_module->load_model)(dnndata->model_filename);
+    if (!dnndata->dnn_model) {
+        av_log(NULL, AV_LOG_ERROR, "could not load DNN model\n");
+        return AVERROR(EINVAL);
+    }
+    //init DNN input & output data
+    dnndata->dnn_input = (DNNData*)av_mallocz(sizeof(DNNData));
+    if (!dnndata->dnn_input) {
+        av_log(NULL, AV_LOG_ERROR, "could not create DNN input buffer\n");
+        return AVERROR(EINVAL);
+    }
+    dnndata->dnn_output = (DNNData*)av_mallocz(sizeof(DNNData));
+    if (!dnndata->dnn_output) {
+        av_log(NULL, AV_LOG_ERROR, "could not create DNN output buffer\n");
+        return AVERROR(EINVAL);
+    }
+    result = dnndata->dnn_model->get_input(dnndata->dnn_model->model, dnndata->dnn_input, dnndata->model_inputname);
+    if (result != DNN_SUCCESS) {
+        av_log(NULL, AV_LOG_ERROR, "could not get input from the model\n");
+        return AVERROR(EIO);
+    }
+    result = (dnndata->dnn_model->set_input_output)(dnndata->dnn_model->model,
+                                        dnndata->dnn_input, dnndata->model_inputname,
+                                        (const char **)&dnndata->model_outputname, 1);
+    if (result != DNN_SUCCESS) {
+        av_log(NULL, AV_LOG_ERROR, "could not set input and output for the model\n");
+        return AVERROR(EIO);
+    }
+    // have a try run in case that the dnn model resize the frame
+    result = (dnndata->dnn_module->execute_model)(dnndata->dnn_model, dnndata->dnn_output, 1);
+    if (result != DNN_SUCCESS) {
+        av_log(NULL, AV_LOG_ERROR, "failed to execute model\n");
+        return AVERROR(EIO);
+    }
+
+    return result;
+}
+static void free_dnnmodel(LVPDnnLoadData** models, int deviceid)
+{
+    LVPDnnLoadData* dnndata;
+    dnndata = models[deviceid];
+    if(!dnndata) return;
+
+    //free string buffer
+    av_free(dnndata->model_filename);
+    av_free(dnndata->model_inputname);
+    av_free(dnndata->model_outputname);
+
+    //free DNN input & output data
+    if (dnndata->dnn_input)
+        av_freep(&dnndata->dnn_input);
+    if (dnndata->dnn_output)
+        av_freep(&dnndata->dnn_output);
+
+    if (dnndata->dnn_module)
+        (dnndata->dnn_module->free_model)(&dnndata->dnn_model);
+
+    av_freep(&dnndata->dnn_module);
+}
+int avfilter_register_lvpdnn(char *modelpath, char *input, char *output, char *deviceids)
+{
+    int ret = 0;
+    char gpuids[64] = {0,};
+    char *token = NULL;
+    int index, i = 0;
+
+    //check arguments
+    if(strlen(modelpath) <= 0 || strlen(input) <= 0 ||
+        strlen(output) <= 0 || strlen(deviceids) <= 0) {
+        av_log(NULL, AV_LOG_ERROR, "include invalid parameter\n");
+        return -1;
+    }
+    //for using strtok function safely
+    strcpy(gpuids,deviceids);
+
+    loadedmodels = (LVPDnnLoadData**)av_mallocz_array(MAX_DEVICE_SIZE, sizeof(LVPDnnLoadData*));
+    if(loadedmodels == 0) {
+        av_log(NULL, AV_LOG_ERROR, "could not create model data array\n");
+        return AVERROR(EIO);
+    }
+
+    if(strlen(gpuids) > 0) {
+        token = strtok(gpuids, ",");
+        while( token != NULL && i < MAX_DEVICE_SIZE) {
+            index = atoi(token);
+            if(index < 0 || index >= MAX_DEVICE_SIZE) continue;
+            ret = create_dnnmodel(loadedmodels, modelpath, input, output, index);
+            if(ret != 0) {
+                av_log(NULL, AV_LOG_ERROR, "could not create model\n");
+                break;
+            }
+            token = strtok(NULL, ",");
+            i++;
+        }
+    }
+    //if fail to create & init the free all models
+    if(ret != 0) {
+        avfilter_remove_lvpdnn();
+    }
+    return ret;
+}
+void avfilter_remove_lvpdnn()
+{
+    int i;
+    for(i=MAX_DEVICE_SIZE -1; i>=0; i--) {
+        if(loadedmodels[i]) {
+            free_dnnmodel(loadedmodels, i);
+            av_free(loadedmodels[i]);
+            loadedmodels[i] = 0;
+        }
+    }
+    if(loadedmodels) {
+        av_freep(&loadedmodels);
+        loadedmodels = NULL;
+    }
+    return;
 }
 
 static const AVFilterPad lvpdnn_inputs[] = {
@@ -453,7 +528,6 @@ static const AVFilterPad lvpdnn_outputs[] = {
     {
         .name = "default",
         .type = AVMEDIA_TYPE_VIDEO,
-        .config_props  = config_output,
     },
     { NULL }
 };
