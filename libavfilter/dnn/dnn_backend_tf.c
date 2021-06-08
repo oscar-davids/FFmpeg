@@ -46,7 +46,7 @@ typedef struct TFModel{
 } TFModel;
 
 //CUDA device ID to support multi GPU
-uint32_t deviceid = -1;
+int32_t deviceid = -1;
 
 static void free_buffer(void *data, size_t length)
 {
@@ -239,8 +239,8 @@ static DNNReturnType load_tf_model(TFModel *tf_model, const char *model_filename
     tf_model->graph = TF_NewGraph();
     tf_model->status = TF_NewStatus();
     graph_opts = TF_NewImportGraphDefOptions();
-    if(deviceid >= 0x30) {
-        sprintf(sdevice,"/gpu:%d", (int)(deviceid-0x30));
+    if(deviceid >= 0) {
+        sprintf(sdevice,"/gpu:%d", deviceid);
         TF_ImportGraphDefOptionsSetDefaultDevice(graph_opts, sdevice);
         //restore default value
         deviceid = -1;

@@ -387,9 +387,9 @@ static int create_dnnmodel(LVPDnnLoadData** models, char *modelpath, char *input
         av_log(NULL, AV_LOG_ERROR, "could not create DNN module for requested backend\n");
         return AVERROR(ENOMEM);
     }
-    //setting device id for model loading, 0x30 is tensorflow protobuf value for gpuid 0
+    //setting device id for model loading.
     if (dnndata->dnn_module->set_deviceid) {
-        dnndata->dnn_module->set_deviceid(0x30 + deviceid);
+        dnndata->dnn_module->set_deviceid(deviceid);
     }
     if (!dnndata->dnn_module->load_model) {
         av_log(NULL, AV_LOG_ERROR, "load_model for network is not specified\n");
